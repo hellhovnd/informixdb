@@ -2004,8 +2004,6 @@ $endif;
         EXEC SQL DECLARE :cursorName CURSOR FOR :queryName; break;
     }
     ret_on_dberror_cursor(self, "DECLARE");
-    EXEC SQL FREE :queryName;
-    ret_on_dberror_cursor(self, "FREE");
     self->state = 2;
     self->pending_scroll = 0;
     self->scroll_value = 0;
@@ -2183,8 +2181,6 @@ static PyObject *Cursor_executemany(Cursor *self,
     if (self->state==1) {
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
       ret_on_dberror_cursor(self, "DECLARE");
-      EXEC SQL FREE :queryName;
-      ret_on_dberror_cursor(self, "FREE");
       self->state = 2;
     }
 
@@ -2718,23 +2714,15 @@ static void doCloseCursor(Cursor *cur, int doFree)
       cur->state = 4;
     }
 
-    if (doFree) {
-      /* if cursor is prepared but not declared, free the statement */
-      if (cur->state == 1)
-        EXEC SQL FREE :queryName;
-
-      /* if cursor is at least declared, free it */
-      if (cur->state >= 2)
-        EXEC SQL FREE :cursorName;
-
-      cur->state = 0;
-    }
-  } else {
-    if (doFree && cur->state == 1) {
-      /* if statement is prepared, free it */
+    /* if doFree and cursor is at least declared, free it */
+    if (doFree && cur->state >= 2)
+      EXEC SQL FREE :cursorName;
+  }
+  if (doFree) {
+    /* if statement is at least prepared, free it */
+    if (cur->state >= 1) 
       EXEC SQL FREE :queryName;
-      cur->state = 0;
-    }
+    cur->state = 0;
   }
 }
 
