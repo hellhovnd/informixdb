@@ -266,7 +266,7 @@ typedef struct Sblob_t
   int sblob_type;
   ifx_lo_create_spec_t *lo_spec;
   ifx_lo_t lo;
-  mint lofd; 
+  mint lofd;
 } Sblob;
 
 PyDoc_STRVAR(Sblob_doc, "\
@@ -657,7 +657,7 @@ static PyMemberDef Cursor_members[] = {
   { "arraysize", T_INT, offsetof(Cursor, arraysize), 0,
     "Number of rows to fetch in fetchmany." },
   { "messages", T_OBJECT_EX, offsetof(Cursor, messages), READONLY,
-    Cursor_messages_doc }, 
+    Cursor_messages_doc },
   { "errorhandler", T_OBJECT_EX, offsetof(Cursor, errorhandler), 0,
     Cursor_errorhandler_doc },
   { "connection", T_OBJECT_EX, offsetof(Cursor, conn), 0,
@@ -665,9 +665,9 @@ static PyMemberDef Cursor_members[] = {
   { "command", T_OBJECT_EX, offsetof(Cursor, op), READONLY,
     "Last prepared or executed command." },
   { "binary_types", T_OBJECT_EX, offsetof(Cursor, binary_types), READONLY,
-    Cursor_binary_types_doc }, 
+    Cursor_binary_types_doc },
   { "sqltimeout", T_INT, offsetof(Cursor, sqltimeout), 0,
-    "SQL query timeout in milliseconds." }, 
+    "SQL query timeout in milliseconds." },
   { NULL }
 };
 
@@ -776,6 +776,7 @@ static PyObject *Connection_self(Connection *self);
 static PyObject *Connection_exit(Connection *self, PyObject *args);
 $ifdef HAVE_ESQL9;
 static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds);
+static PyObject *Connection_cdc_read(Connection *self, PyObject *args, PyObject *kwargs);
 $endif;
 
 PyDoc_STRVAR(Connection_cursor_doc,
@@ -850,6 +851,10 @@ Any combination of explicit storage characteristics may be present.\n\
 Explicit storage characteristics that are given will be combined\n\
 with database defined or col_info derived default values for storage\n\
 characteristics that are not given.");
+
+PyDoc_STRVAR(Connection_cdc_read_doc,
+"cdc_read(cdc session id, nbytes) -> buffer\n\n\
+Read nbytes from the CDC BLOB for session id.");
 $endif;
 
 static PyMethodDef Connection_methods[] = {
@@ -868,6 +873,8 @@ static PyMethodDef Connection_methods[] = {
 $ifdef HAVE_ESQL9;
   { "Sblob", (PyCFunction)Connection_Sblob, METH_VARARGS|METH_KEYWORDS,
     Connection_Sblob_doc },
+  { "cdc_read", (PyCFunction)Connection_cdc_read, METH_VARARGS|METH_KEYWORDS,
+    Connection_cdc_read_doc },
 $endif;
   { NULL }
 };
@@ -908,15 +915,15 @@ static PyMemberDef Connection_members[] = {
   { "binary_types", T_OBJECT_EX, offsetof(Connection, binary_types), READONLY,
     Connection_binary_types_doc },
   { "dbms_name", T_OBJECT_EX, offsetof(Connection, dbms_name), READONLY,
-    "Name of the database engine." }, 
+    "Name of the database engine." },
   { "dbms_version", T_OBJECT_EX, offsetof(Connection, dbms_version), READONLY,
-    "Version of the database engine." }, 
+    "Version of the database engine." },
   { "driver_name", T_OBJECT_EX, offsetof(Connection, driver_name), READONLY,
-    "Name of the client driver." }, 
+    "Name of the client driver." },
   { "driver_version", T_OBJECT_EX, offsetof(Connection, driver_version), READONLY,
-    "Version of the client driver." }, 
+    "Version of the client driver." },
   { "sqltimeout", T_INT, offsetof(Connection, sqltimeout), 0,
-    "Default SQL query timeout in milliseconds." }, 
+    "Default SQL query timeout in milliseconds." },
   { NULL }
 };
 
@@ -1115,7 +1122,7 @@ static PyObject *Connection_self(Connection *self)
 static PyObject *Connection_exit(Connection *self, PyObject *args)
 {
   PyObject *ret = Connection_close(self);
-  if (!ret) 
+  if (!ret)
     return NULL;
   Py_DECREF(ret);
   Py_RETURN_NONE;
@@ -1236,9 +1243,9 @@ static int doParse(parseContext *ct)
       if ((ch == '\'') || (ch == '"')) {
         ct->state = ch;
       } else if (ch == '-' && ct->prev=='-') {
-        ct->state = '\n'; 
+        ct->state = '\n';
       } else if (ch == '{') {
-        ct->state = '}'; 
+        ct->state = '}';
       } else if (ch == '?') {
         ct->parmIdx = ct->parmCount;
         ct->parmCount++;
@@ -1492,7 +1499,7 @@ static int ibindSblob(struct sqlvar_struct *var, PyObject *item)
   ifx_lo_t *data = malloc(sizeof(ifx_lo_t));
   memcpy(data, &(sblob->lo), sizeof(ifx_lo_t));
   var->sqltype = SQLUDTFIXED;
-  if (sblob->sblob_type==SBLOB_TYPE_CLOB) 
+  if (sblob->sblob_type==SBLOB_TYPE_CLOB)
     var->sqlxid = XID_CLOB;
   else
     var->sqlxid = XID_BLOB;
@@ -1587,7 +1594,7 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
       have_positional = 1;
     }
     else {
-      /* negative parmIdx indicates a named parameter (:<name>), 
+      /* negative parmIdx indicates a named parameter (:<name>),
          the name is stored in parmName/parmLen of the parseContext.
       */
       PyObject *parmname;
@@ -1673,12 +1680,12 @@ static int bindInput(Cursor *cur, PyObject *vars)
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
       return 0;
     }
-  
+
     for (i = 0; i < cur->daIn.sqld; ++i) {
       if (cur->parmIdx[i] < n_vars) {
         int success;
         PyObject *item = PySequence_GetItem(vars, cur->parmIdx[i]);
-  
+
         success = (*ibindFcn(item))(var++, item);
         Py_DECREF(item);  /* PySequence_GetItem increments it */
         if (!success)
@@ -1690,7 +1697,7 @@ static int bindInput(Cursor *cur, PyObject *vars)
         return 0;
       }
     }
-  
+
     if (maxp+1 < n_vars) {
       error_handle(cur->conn, cur, ExcInterfaceError,
                    PyString_FromString("too many actual parameters"));
@@ -1843,7 +1850,7 @@ $ifdef HAVE_ESQL9;
           currentlvarcharptr = malloc(sizeof(void *));
           *currentlvarcharptr = 0;
           ifx_var_flag(currentlvarcharptr,1);
-    
+
           var->sqldata = *currentlvarcharptr;
           var->sqllen  = sizeof(void *);
           known_type = 1;
@@ -1865,7 +1872,7 @@ $endif;
   bufp = cur->outputBuffer = malloc(count);
 
   /* the second loop through is for handing out chunks of the output buffer
-     for the simple types. */ 
+     for the simple types. */
   for (pos = 0, var = cur->daOut->sqlvar;
        pos < cur->daOut->sqld;
        pos++, var++) {
@@ -1971,7 +1978,7 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
   ret_on_dberror_cursor(self, "DESCRIBE");
   self->daOut = tdaOut;
   self->stype = SQLCODE;
-  self->has_output = 
+  self->has_output =
     (self->stype == 0 || (self->stype == SQ_EXECPROC && tdaOut->sqld > 0) );
 
   if (self->has_output || self->stype == SQ_EXECPROC) {
@@ -2055,7 +2062,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   char *cursorName = self->cursorName;
   EXEC SQL END DECLARE SECTION;
   void (*oldsighandler)(int);
-  
+
   oldsighandler = NULL;
   clear_messages(self);
   require_cursor_open(self);
@@ -2065,7 +2072,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     return NULL;
   if (op==Py_None)
     op = self->op;
-  
+
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
@@ -2281,7 +2288,7 @@ static PyObject *doCopy(struct sqlvar_struct *var,
     exec sql end declare section;
 
     origdt = dt;
-    dtextend(dt, &dt_extended);    
+    dtextend(dt, &dt_extended);
     dt = &dt_extended;
 
     for (pos = 0, i = TU_START(dt->dt_qual);
@@ -2345,7 +2352,7 @@ static PyObject *doCopy(struct sqlvar_struct *var,
        Day(9) to Fraction(5)
            decimal digits: 0DDDDDDDDDHHMMSS.FFFFF
         base-100 position: _8_7_6_5_4_3_2_1 _0-1-2
-    */     
+    */
     int i, pos, d, sign=0;
     int year=0,month=0,day=0,hour=0,minute=0,second=0,usec=0;
     intrvl_t* inv = (intrvl_t*)data;
@@ -2500,7 +2507,7 @@ $ifdef HAVE_ESQL9;
         Py_DECREF(result);
         result = NULL;
       }
-      else { 
+      else {
         memcpy(b_mem, lvcharbuf, (int)b_len);
       }
     }
@@ -2604,6 +2611,39 @@ static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kw
   slob = PyObject_Call((PyObject*)&Sblob_type, a, kwds);
   Py_DECREF(a);
   return slob;
+}
+
+static PyObject *Connection_cdc_read(Connection *self, PyObject *args, PyObject *kwargs)
+{
+  static char* kwdlist[] = { "session_id", "nbytes", 0 };
+  mint result, err;
+  char *buf;
+  PyObject *py_result;
+  mint session_id, buflen;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii", kwdlist, &session_id, &buflen)) {
+    return NULL;
+  }
+
+  buf = PyMem_Malloc(buflen);
+  if (!buf) {
+    return PyErr_NoMemory();
+  }
+
+  if (setConnection(self)) {
+    return NULL;
+  }
+
+  result = ifx_lo_read(session_id, buf, buflen, &err);
+  if (result<0) {
+    PyMem_Free(buf);
+    ret_on_dberror(self, NULL, "ifx_lo_read");
+  }
+
+  py_result = PyString_FromStringAndSize(buf, result);
+  PyMem_Free(buf);
+
+  return py_result;
 }
 $endif;
 
@@ -2721,7 +2761,7 @@ static void doCloseCursor(Cursor *cur, int doFree)
   }
   if (doFree) {
     /* if statement is at least prepared, free it */
-    if (cur->state >= 1) 
+    if (cur->state >= 1)
       EXEC SQL FREE :queryName;
     cur->state = 0;
   }
@@ -2772,7 +2812,7 @@ static PyObject *Cursor_close(Cursor *self)
 static PyObject *Cursor_exit(Cursor *self, PyObject *args)
 {
   PyObject *ret = Cursor_close(self);
-  if (!ret) 
+  if (!ret)
     return NULL;
   Py_DECREF(ret);
   Py_RETURN_NONE;
@@ -3020,7 +3060,7 @@ static PyObject* Cursor_scroll(Cursor *self, PyObject *args, PyObject *kwds)
   } else {
     PyErr_Format(ExcInterfaceError,"Unrecognized scroll mode '%s'.", mode_str);
     return NULL;
-  } 
+  }
   /* Actual scrolling on the database side is tied to fetching. We could do
      a dummy fetch now and then "fetch current" when the user actually fetches,
      but that would waste time on unnecessary fetches. Instead, we'll just
@@ -3158,7 +3198,7 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
     dbPass = PyString_AsString(pyDbPass);
     if (!dbPass) return -1;
   }
-  
+
   sprintf(self->name, "CONN%p", self);
   connectionName = self->name;
   self->is_open = 0;
@@ -3274,8 +3314,8 @@ static int Connection_setautocommit(Connection *self, PyObject *value,
 
 static PyObject* DatabaseError_init(PyObject* self, PyObject* args, PyObject* kwds)
 {
-  static char* kwdnames[] = { "self", "action", "sqlcode", "diagnostics", 
-                              "sqlerrm", 0 }; 
+  static char* kwdnames[] = { "self", "action", "sqlcode", "diagnostics",
+                              "sqlerrm", 0 };
   PyObject *action;
   PyObject *diags;
   long int sqlcode;
@@ -3801,7 +3841,7 @@ static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
   ifx_int8_t estbytes, maxbytes;
 
   static char* kwdlist[] = {
-    "connection", "do_create", "type", "create_flags", "open_flags", 
+    "connection", "do_create", "type", "create_flags", "open_flags",
     "col_info", "sbspace", "extsz", "estbytes", "maxbytes", 0
   };
   mint result, err;
@@ -3995,7 +4035,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i", kwdlist,
                                    &py_offset, &whence))
     return NULL;
-  
+
   if (makeint8(py_offset, &offset)<0) {
     PyErr_SetString(PyExc_TypeError, "non-numeric offset");
     return NULL;
@@ -4007,7 +4047,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
   if (ifx_int8toasc(&seek_pos, pos_str, 29)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
   }
-  pos_str[29] = 0; 
+  pos_str[29] = 0;
   return PyLong_FromString(pos_str, NULL, 10);
 }
 
@@ -4028,7 +4068,7 @@ static PyObject *Sblob_tell(Sblob *self)
   if (ifx_int8toasc(&seek_pos, pos_str, 29)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
   }
-  pos_str[29] = 0; 
+  pos_str[29] = 0;
   return PyLong_FromString(pos_str, NULL, 10);
 }
 
@@ -4089,7 +4129,7 @@ static PyObject *Sblob_stat(Sblob *self)
   } else {
     mtime_result = maketimestamp(mtime);
   }
-  size_str[29] = 0; 
+  size_str[29] = 0;
   size_result = PyLong_FromString(size_str, NULL, 10);
   return Py_BuildValue("{sNsNsNsNsi}", "size", size_result,
     "atime", atime_result, "ctime", ctime_result,
@@ -4109,7 +4149,7 @@ static PyObject *Sblob_truncate(Sblob *self, PyObject *args, PyObject *kwargs)
   }
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O", kwdlist, &py_offset))
     return NULL;
-  
+
   if (makeint8(py_offset, &offset)<0) {
     PyErr_SetString(PyExc_TypeError, "non-numeric offset");
     return NULL;
@@ -4185,7 +4225,7 @@ static PyObject *Sblob_specget(Sblob *self, void *closure)
       if (ifx_int8toasc(&int8result, buf, 29)<0) {
         ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
       }
-      buf[29] = 0; 
+      buf[29] = 0;
       return PyLong_FromString(buf, NULL, 10);
       break;
   }
