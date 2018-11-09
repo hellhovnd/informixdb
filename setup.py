@@ -34,7 +34,7 @@ class build_ext(_build_ext):
 
         self.esql_informixdir = None
         self.esql_threadlib = None
-        self.esql_static = 1 # link staticly by default
+        self.esql_static = 0 # link dynamically by default
         self.esql_parts = []
 
     def finalize_options(self):
@@ -63,7 +63,6 @@ class build_ext(_build_ext):
 
         if self.esql_static:
             self.esql_parts.append('-static')
-        self.esql_parts.append('-g')
 
         # determine esql version
         driver_name = "INFORMIX-ESQL"

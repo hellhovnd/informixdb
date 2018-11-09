@@ -17,6 +17,9 @@ develop-eggs
 .installed.cfg
 lib
 lib64
+ext/esqlver.h
+ext/_informixdb.c
+*.swp
 
 # Installer logs
 pip-log.txt
